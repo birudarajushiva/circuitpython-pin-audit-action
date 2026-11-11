@@ -1,0 +1,56 @@
+name: CircuitPython Pin Audit
+description: Check firmware pin ownership and annotate potential conflicts without executing firmware.
+author: Shiva Birudaraju
+branding:
+  icon: cpu
+  color: orange
+inputs:
+  paths:
+    description: One file or directory per line, relative to the checked-out repository. Files are independent entrypoints.
+    required: false
+    default: code.py
+  aliases:
+    description: Optional JSON board-pin alias file.
+    required: false
+    default: ''
+  exclude:
+    description: Optional exclusion globs, one per line.
+    required: false
+    default: ''
+  strict:
+    description: Also fail when the analyzer reports known coverage gaps (true or false).
+    required: false
+    default: 'true'
+outputs:
+  exit-code:
+    description: Analyzer exit code (0 clean, 1 findings, 2 operational error).
+    value: ${{ steps.audit.outputs.exit-code }}
+  conflicts:
+    description: Number of potential pin-conflict diagnostics.
+    value: ${{ steps.audit.outputs.conflicts }}
+  coverage-gap-files:
+    description: Number of files with recognized analysis gaps.
+    value: ${{ steps.audit.outputs.coverage-gap-files }}
+  report-path:
+    description: JSON report in a fresh runner-temporary directory, available even after findings.
+    value: ${{ steps.audit.outputs.report-path }}
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: '3.12'
+    - name: Install reviewed analyzer revision
+      shell: bash
+      run: python -I -m pip install --no-deps 'git+https://github.com/birudarajushiva/circuitpython-pin-audit.git@ae455d5d4887373d2b33d7c72b2c6c52c99b5098'
+    - name: Audit pin ownership
+      id: audit
+      shell: bash
+      env:
+        PIN_AUDIT_ACTION_DIR: ${{ github.action_path }}
+        PIN_AUDIT_PATHS: ${{ inputs.paths }}
+        PIN_AUDIT_ALIASES: ${{ inputs.aliases }}
+        PIN_AUDIT_EXCLUDE: ${{ inputs.exclude }}
+        PIN_AUDIT_STRICT: ${{ inputs.strict }}
+      run: python -I "$PIN_AUDIT_ACTION_DIR/runner.py"

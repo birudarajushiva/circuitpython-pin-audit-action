@@ -1,0 +1,44 @@
+name: Action integration
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -I -m pip install --no-deps 'git+https://github.com/birudarajushiva/circuitpython-pin-audit.git@ae455d5d4887373d2b33d7c72b2c6c52c99b5098'
+      - run: python -I -m unittest discover -s tests -v
+      - uses: ./
+        id: valid
+        with:
+          paths: fixtures/valid.py
+      - name: Assert valid outputs
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.valid.outputs.exit-code }}
+          CONFLICTS: ${{ steps.valid.outputs.conflicts }}
+          REPORT: ${{ steps.valid.outputs.report-path }}
+        run: python -I -c 'import os,pathlib; assert os.environ["EXIT_CODE"]=="0"; assert os.environ["CONFLICTS"]=="0"; assert pathlib.Path(os.environ["REPORT"]).is_file()'
+      - uses: ./
+        id: conflict
+        continue-on-error: true
+        with:
+          paths: fixtures/conflict.py
+      - name: Assert a conflict fails the action and preserves its report
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.conflict.outcome }}
+          EXIT_CODE: ${{ steps.conflict.outputs.exit-code }}
+          REPORT: ${{ steps.conflict.outputs.report-path }}
+        run: python -I -c 'import os,pathlib; assert os.environ["OUTCOME"]=="failure"; assert os.environ["EXIT_CODE"]=="1"; assert pathlib.Path(os.environ["REPORT"]).is_file()'
