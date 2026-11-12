@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('adapter', ROOT / 'runner.py')
@@ -64,6 +65,39 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn('does not exist', report['error'])
         self.assertIn('report-path<<', (self.root/'outputs').read_text())
+
+    def test_malformed_report_preserves_operational_error_outputs(self):
+        valid_file = {
+            'path': 'code.py', 'conflicts': 0, 'incomplete': False, 'diagnostics': []
+        }
+        malformed = [
+            [], None, {'schema_version': 1, 'files': [None]},
+            {'schema_version': 1, 'files': [{}]},
+            {'schema_version': 1, 'files': [dict(valid_file, conflicts='zero')]},
+            {'schema_version': 1, 'files': [dict(valid_file, diagnostics=[{}])]},
+        ]
+        for index, document in enumerate(malformed):
+            with self.subTest(document=document):
+                directory = self.root / str(index)
+                directory.mkdir()
+                env = {
+                    'RUNNER_TEMP': str(directory),
+                    'GITHUB_OUTPUT': str(directory / 'outputs'),
+                    'GITHUB_STEP_SUMMARY': str(directory / 'summary'),
+                }
+                completed = subprocess.CompletedProcess([], 0, json.dumps(document), '')
+                out = io.StringIO()
+                with mock.patch.object(adapter.subprocess, 'run', return_value=completed), \
+                        contextlib.redirect_stdout(out):
+                    status = adapter.main(env)
+                self.assertEqual(status, 2)
+                saved = json.loads(next(directory.glob('pin-audit-*/report.json')).read_text())
+                self.assertEqual(saved['exit_code'], 2)
+                self.assertIsNone(saved['scan'])
+                self.assertIn('report', saved['error'])
+                self.assertIn('report-path<<', (directory / 'outputs').read_text())
+                self.assertIn('Exit code: 2', (directory / 'summary').read_text())
+                self.assertIn('::error ', out.getvalue())
 
     def test_invalid_syntax_is_saved(self):
         result, report = self.run_action('if (')

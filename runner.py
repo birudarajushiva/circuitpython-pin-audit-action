@@ -56,6 +56,26 @@ def outputs(path: str, values: dict[str, str]) -> None:
             stream.write(f"{key}<<{delimiter}\n{value}\n{delimiter}\n")
 
 
+def validate_report(document: object) -> None:
+    """Validate fields consumed by the adapter before emitting any results."""
+    if (not isinstance(document, dict) or document.get("schema_version") != 1
+            or not isinstance(document.get("files"), list)):
+        raise ValueError("unexpected analyzer report schema")
+    for file in document["files"]:
+        if (not isinstance(file, dict) or not isinstance(file.get("path"), str)
+                or type(file.get("conflicts")) is not int or file["conflicts"] < 0
+                or type(file.get("incomplete")) is not bool
+                or not isinstance(file.get("diagnostics"), list)):
+            raise ValueError("invalid file entry in analyzer report")
+        for item in file["diagnostics"]:
+            if (not isinstance(item, dict)
+                    or item.get("severity") not in ("error", "warning", "notice")
+                    or not all(isinstance(item.get(key), str) for key in ("code", "message"))
+                    or not all(type(item.get(key)) is int and item[key] >= 1
+                               for key in ("line", "column"))):
+                raise ValueError("invalid diagnostic in analyzer report")
+
+
 def main(env: dict[str, str] | None = None) -> int:
     env = dict(os.environ if env is None else env)
     document = None
@@ -69,11 +89,11 @@ def main(env: dict[str, str] | None = None) -> int:
         if exit_code not in {0, 1, 2}:
             raise ValueError(f"analyzer terminated with unexpected status {exit_code}")
         try:
-            document = json.loads(completed.stdout)
+            candidate = json.loads(completed.stdout)
         except json.JSONDecodeError:
             raise ValueError(completed.stderr.strip() or "analyzer returned no valid JSON report") from None
-        if document.get("schema_version") != 1 or not isinstance(document.get("files"), list):
-            raise ValueError("unexpected analyzer report schema")
+        validate_report(candidate)
+        document = candidate
     except (OSError, ValueError, subprocess.TimeoutExpired) as failure:
         error = str(failure)
         exit_code = 2
